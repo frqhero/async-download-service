@@ -8,8 +8,8 @@ import aiofiles
 
 
 async def archive(request):
-    archive_hash = request.match_info.get('archive_hash')
-    path = f'{parser_args.path}/{archive_hash}'
+    archive_hash = request.match_info['archive_hash']
+    path = f'{request.app['photo_dir']}/{archive_hash}'
     if not os.path.exists(path):
         raise web.HTTPNotFound(text='Архив не найден')
 
@@ -22,10 +22,13 @@ async def archive(request):
     )
     await response.prepare(request)
 
-    proc = await asyncio.create_subprocess_exec(
-        'zip', '-r', '-', path,
+    original_dir = os.getcwd()
+    desired_dir = os.path.join(original_dir, path)
+    command = f'cd {desired_dir} && zip -r - .'
+    proc = await asyncio.create_subprocess_shell(
+        command,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
     )
 
     chunk_size = 64 * 1024
@@ -34,7 +37,7 @@ async def archive(request):
             chunk = await proc.stdout.read(chunk_size)
             logging.debug('Sending archive chunk ...')
             await response.write(chunk)
-            await asyncio.sleep(parser_args.delay)
+            await asyncio.sleep(request.app['delay'])
     finally:
         try:
             proc.kill()
@@ -77,15 +80,21 @@ def create_parser():
     return parser
 
 
-if __name__ == '__main__':
+def main():
     parser = create_parser()
     parser_args = parser.parse_args()
     if parser_args.logs:
         logging.basicConfig(level=logging.DEBUG)
 
     app = web.Application()
+    app['photo_dir'] = parser_args.path
+    app['delay'] = parser_args.delay
     app.add_routes([
         web.get('/', handle_index_page),
         web.get('/archive/{archive_hash}/', archive),
     ])
     web.run_app(app)
+
+
+if __name__ == '__main__':
+    main()
